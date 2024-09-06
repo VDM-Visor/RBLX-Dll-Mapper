@@ -1,25 +1,50 @@
 import ctypes
-import psutil
-from ctypes import wintypes
+from ctypes import wintypes, c_void_p, c_size_t
 
 class Driver:
     _singleton = None
+
+    class DRIVER_REQUEST(ctypes.Structure):
+        _fields_ = [
+            ("type", wintypes.DWORD),
+            ("pid", wintypes.HANDLE),
+            ("address", c_void_p),
+            ("buffer", c_void_p),
+            ("size", c_size_t),
+            ("base", c_void_p)
+        ]
+
+    REQUEST_TYPE_NONE = 0
+    REQUEST_TYPE_BASE = 1
+    REQUEST_TYPE_WRITE = 2
+    REQUEST_TYPE_READ = 3
 
     def __new__(cls):
         if cls._singleton is None:
             cls._singleton = super().__new__(cls)
         return cls._singleton
 
+    def __init__(self):
+        self.nt_user_function = None
+        self.process_id = None
+        self.base_address = None
+        self.user32 = None
+        self.win32u = None
+
     @staticmethod
-    def get_process_id(process_name):
+    def get_singleton():
+        return Driver()
+
+    def get_process_id(self, process_name):
         """Get the process ID by name."""
+        import psutil
         for proc in psutil.process_iter(['pid', 'name']):
             if proc.info['name'].lower() == process_name.lower():
                 return proc.info['pid']
         return 0
 
     def setup(self):
-        """Initialize library and function pointers."""
+        """Initialize the NT user function pointer."""
         if not self._init_libraries():
             return False
         try:
@@ -48,61 +73,47 @@ class Driver:
         except AttributeError:
             return None
 
-    def get_base_address(self, process_id):
+    def get_base_address(self):
         """Send a request to the driver to get the base address."""
-        request = DRIVER_REQUEST()
-        request.type = BASE
-        request.pid = wintypes.HANDLE(process_id)
+        request = self.DRIVER_REQUEST()
+        request.type = self.REQUEST_TYPE_BASE
+        request.pid = wintypes.HANDLE(self.process_id)
         self._send_request(request)
         return request.base
 
     def writem(self, address, buffer, size):
         """Send a request to the driver to write memory."""
-        request = DRIVER_REQUEST()
-        request.type = WRITE
+        request = self.DRIVER_REQUEST()
+        request.type = self.REQUEST_TYPE_WRITE
         request.pid = wintypes.HANDLE(self.process_id)
-        request.address = address
-        request.buffer = buffer
+        request.address = c_void_p(address)
+        request.buffer = c_void_p(ctypes.addressof(buffer))
         request.size = size
         self._send_request(request)
 
     def readm(self, address, buffer, size):
         """Send a request to the driver to read memory."""
-        request = DRIVER_REQUEST()
-        request.type = READ
+        request = self.DRIVER_REQUEST()
+        request.type = self.REQUEST_TYPE_READ
         request.pid = wintypes.HANDLE(self.process_id)
-        request.address = address
-        request.buffer = buffer
+        request.address = c_void_p(address)
+        request.buffer = c_void_p(ctypes.addressof(buffer))
         request.size = size
         self._send_request(request)
 
     def _send_request(self, request):
-        """Send a request to the driver (stub)."""
-        pass
-
-class DRIVER_REQUEST(ctypes.Structure):
-    _fields_ = [
-        ("type", wintypes.DWORD),
-        ("pid", wintypes.HANDLE),
-        ("address", ctypes.c_void_p),
-        ("buffer", ctypes.c_void_p),
-        ("size", wintypes.DWORD),
-        ("base", ctypes.c_void_p)
-    ]
-
-BASE = 1
-WRITE = 2
-READ = 3
-
-
-if __name__ == "__main__":
-    driver = Driver()
-    if driver.setup():
-        process_id = driver.get_process_id("example.exe")
-        if process_id:
-            base_address = driver.get_base_address(process_id)
-            print(f"[+] Base address: {base_address}")
+        """Send a request to the driver."""
+        if self.nt_user_function:
+            self.nt_user_function(ctypes.cast(ctypes.pointer(request), ctypes.c_void_p).value)
         else:
-            print("[-] Process not found.")
-    else:
-        print("[-] Driver setup failed.")
+            raise RuntimeError("nt_user_function is not initialized")
+
+    def write(self, address, value):
+        """Write a value to a memory address."""
+        self.writem(address, value, ctypes.sizeof(type(value)))
+
+    def read(self, address, value_type):
+        """Read a value from a memory address."""
+        buffer = value_type()
+        self.readm(address, buffer, ctypes.sizeof(buffer))
+        return buffer
