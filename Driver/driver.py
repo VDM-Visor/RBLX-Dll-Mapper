@@ -36,7 +36,6 @@ class Driver:
         return Driver()
 
     def get_process_id(self, process_name):
-        """Get the process ID by name."""
         import psutil
         for proc in psutil.process_iter(['pid', 'name']):
             if proc.info['name'].lower() == process_name.lower():
@@ -44,7 +43,6 @@ class Driver:
         return 0
 
     def setup(self):
-        """Initialize the NT user function pointer."""
         if not self._init_libraries():
             return False
         try:
@@ -57,7 +55,6 @@ class Driver:
             return False
 
     def _init_libraries(self):
-        """Load necessary libraries."""
         try:
             self.user32 = ctypes.WinDLL("user32.dll")
             self.win32u = ctypes.WinDLL("win32u.dll")
@@ -74,7 +71,6 @@ class Driver:
             return None
 
     def get_base_address(self):
-        """Send a request to the driver to get the base address."""
         request = self.DRIVER_REQUEST()
         request.type = self.REQUEST_TYPE_BASE
         request.pid = wintypes.HANDLE(self.process_id)
@@ -82,7 +78,6 @@ class Driver:
         return request.base
 
     def writem(self, address, buffer, size):
-        """Send a request to the driver to write memory."""
         request = self.DRIVER_REQUEST()
         request.type = self.REQUEST_TYPE_WRITE
         request.pid = wintypes.HANDLE(self.process_id)
@@ -92,7 +87,6 @@ class Driver:
         self._send_request(request)
 
     def readm(self, address, buffer, size):
-        """Send a request to the driver to read memory."""
         request = self.DRIVER_REQUEST()
         request.type = self.REQUEST_TYPE_READ
         request.pid = wintypes.HANDLE(self.process_id)
@@ -102,18 +96,15 @@ class Driver:
         self._send_request(request)
 
     def _send_request(self, request):
-        """Send a request to the driver."""
         if self.nt_user_function:
             self.nt_user_function(ctypes.cast(ctypes.pointer(request), ctypes.c_void_p).value)
         else:
             raise RuntimeError("nt_user_function is not initialized")
 
     def write(self, address, value):
-        """Write a value to a memory address."""
         self.writem(address, value, ctypes.sizeof(type(value)))
 
     def read(self, address, value_type):
-        """Read a value from a memory address."""
         buffer = value_type()
         self.readm(address, buffer, ctypes.sizeof(buffer))
         return buffer
